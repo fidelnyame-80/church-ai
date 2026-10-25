@@ -14,7 +14,7 @@ const serviceAccountEmail = () => process.env.GOOGLE_SERVICE_ACCOUNT_EMAIL || pr
 
 export const configStatus = getAppConfig;
 
-async function accessToken(): Promise<string> {
+export async function googleSheetsAccessToken(): Promise<string> {
   if (process.env.GOOGLE_APPLICATION_CREDENTIALS) {
     const auth = fileAuth ??= new GoogleAuth({ keyFile: process.env.GOOGLE_APPLICATION_CREDENTIALS, scopes: [scope] });
     const token = await auth.getAccessToken();
@@ -45,7 +45,7 @@ export async function loadChurchData(force = false): Promise<ChurchData> {
 async function readChurchData(): Promise<ChurchData> {
   const id = spreadsheetId();
   if (!id) throw new Error("GOOGLE_SHEET_ID is not configured.");
-  const token = await accessToken();
+  const token = await googleSheetsAccessToken();
   const url = new URL("https://sheets.googleapis.com/v4/spreadsheets/" + encodeURIComponent(id) + "/values:batchGet");
   url.searchParams.append("ranges", "'Members'!A:D");
   url.searchParams.append("ranges", "'Form Responses 1'!A:G");

@@ -12,6 +12,10 @@ test("explicit charts, comparisons, trends and reports still show results", () =
     assert.equal(wantsAnalyticsDisplay(question), true, question);
   }
 });
+test("multi-Sonta two-Sunday absence lists show their verified table", () => {
+  assert.equal(wantsAnalyticsDisplay("list absentees from last two weeks sunday for the various sontas"), true);
+  assert.equal(wantsAnalyticsDisplay("How many members are in Culinary Stars?"), false);
+});
 test("requests for a plain answer override chart keywords", () => {
   for (const question of ["Compare them without charts.", "No analytics, just the count.", "Don't show a table; just answer.", "Report the number only, without any charts."]) {
     assert.equal(wantsAnalyticsDisplay(question), false, question);

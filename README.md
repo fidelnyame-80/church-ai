@@ -26,6 +26,16 @@ Simple questions return a direct answer. Charts and tables appear for requested 
 
 Attendance is stored as rows, with Service Date in column C and Attendance Status in column G of Form Responses 1. The number of Sundays is the number of distinct service dates, never the number of columns. “Last Sunday” refers to the latest recorded Sunday, and answers state its actual date. Roster counts use Members, independently of attendance submissions. Scoped attendee lists resolve the ministry and date before checking each member's recorded status; conflicting Present and Absent entries do not count as present.
 
+The church calls its ministry/group categories **Sontas**. The spreadsheet still labels this field `Ministry / Group`; its values are the names of individual Sontas. Questions about “various Sontas” cover every group. A request for absentees from the last two Sundays checks the two latest recorded Sunday dates separately and lists only explicit Absent statuses by date and Sonta.
+
+## Connect additional spreadsheets
+
+Set `CHURCH_AI_ADMIN_PASSWORD` to a unique password of at least 12 characters in `.env.local` and in Vercel's Production environment variables. Redeploy after adding it to Vercel. In Settings, unlock the connector with that password, share another spreadsheet with the same Google service account as a Viewer, and paste its full Google Sheets URL. The app confirms the spreadsheet title and worksheet tabs. Connections are held in a signed, HTTP-only cookie for seven days in that browser; they are not shared across browsers or accounts. Locking connections removes access from the current browser.
+
+The assistant can query these worksheets using the header row in row 1, with up to three column filters. It can list matching rows, count rows, and count rows by a column. Query results link back to the source worksheet and show the scanned range. Each query scans up to the first 2,000 data rows and 52 columns per worksheet; a full scan limit is disclosed in the answer. The displayed row list is limited to 30 rows and 18 selected columns. Up to eight extra spreadsheets and 20 worksheets per spreadsheet are supported. This connector does not change the fixed Members and Form Responses 1 attendance calculations.
+
+The admin password protects these additional sheets. The original church dashboard and member APIs remain public in this starter; put the deployed app behind access control before treating its records as private.
+
 ## Connect text chat
 
 Edit `.env.local` in this directory, alongside `package.json` (the inner `church-ai-assistant` folder).

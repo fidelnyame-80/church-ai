@@ -18,7 +18,7 @@ export type AnalyticsResult = {
   fetchedAt: string; verification?: SourceVerification;
 };
 export type AnalyticsArgs = {
-  operation: "overview" | "member_count" | "attendance_list" | "absent_last_sunday" | "consecutive_absences" | "ministry_comparison" | "top_ministry" | "trend" | "member_history" | "member_search" | "ministries";
+  operation: "overview" | "member_count" | "attendance_list" | "recent_absences" | "absent_last_sunday" | "consecutive_absences" | "ministry_comparison" | "top_ministry" | "trend" | "member_history" | "member_search" | "ministries";
   count?: number; memberName?: string; ministryNames?: string[]; date?: string; status?: AttendanceStatus;
 };
 
@@ -104,15 +104,19 @@ function base(data: ChurchData, operation: string, title: string, summary: strin
 function ministryNames(data: ChurchData): string[] {
   return [...new Set(data.members.map((member) => member.ministry).filter(Boolean))].sort((a, b) => a.localeCompare(b));
 }
+function allSontas(name: string): boolean {
+  return /^(?:(?:all|various|every|each|different|the) )?(?:sontas?|ministries|groups)$/.test(normalize(name));
+}
 function resolveMinistries(data: ChurchData, requestedNames?: string[]): { names: string[]; error?: string } {
   const available = ministryNames(data);
   const matched = new Set<string>();
   for (const requestedName of (requestedNames ?? []).map((name) => name.trim()).filter(Boolean)) {
+    if (allSontas(requestedName)) continue;
     const exact = available.filter((name) => normalize(name) === normalize(requestedName));
     const matches = exact.length ? exact : available.filter((name) => normalize(name).includes(normalize(requestedName)));
     if (matches.length !== 1) return { names: [], error: matches.length
-      ? `Which ministry do you mean? Matching ministries: ${matches.join(", ")}.`
-      : `I couldn't find a ministry named "${requestedName}" in the member roster.` };
+      ? `Which Sonta do you mean? Matching Sontas: ${matches.join(", ")}.`
+      : `I couldn't find a Sonta named "${requestedName}" in the member roster.` };
     matched.add(matches[0]);
   }
   return { names: [...matched] };
@@ -120,18 +124,20 @@ function resolveMinistries(data: ChurchData, requestedNames?: string[]): { names
 
 function sourceVerification(data: ChurchData, args: AnalyticsArgs, result: AnalyticsResult): SourceVerification {
   const allDates = sundayDates(data);
-  const count = Math.min(Math.max(Math.floor(args.count || 3), 1), 52);
+  const count = Math.min(Math.max(Math.floor(args.count || (args.operation === "recent_absences" ? 2 : 3)), 1), 52);
   const rosterOnly = args.operation === "member_count" || args.operation === "member_search";
   const scope = resolveMinistries(data, args.ministryNames);
   let members = scope.error ? [] : data.members.filter((member) => !scope.names.length || scope.names.includes(member.ministry));
   const filters = scope.names.length ? ["Ministry / Group = " + scope.names.join("; ")] : [];
+  if (args.operation === "recent_absences" && !scope.names.length) filters.push("Sontas = all groups in Members.");
   if (args.operation === "member_search" || args.operation === "member_history") {
     const query = normalize(args.memberName ?? "");
     members = members.filter((member) => query && (normalize(member.name).includes(query) || normalize(member.id) === query || normalize(member.email) === query));
     filters.push("Member lookup = " + (args.memberName ?? ""));
   }
   let dates = rosterOnly ? [] : allDates;
-  if (args.operation === "trend" || args.operation === "consecutive_absences") dates = allDates.slice(-count);
+  if (args.operation === "trend" || args.operation === "consecutive_absences" || args.operation === "recent_absences") dates = allDates.slice(-count);
+  if (args.operation === "recent_absences") filters.push("Recorded status = absent; each of the last " + count + " recorded Sundays is checked separately.");
   if (args.operation === "attendance_list" || args.operation === "absent_last_sunday") {
     dates = [args.date ?? allDates.at(-1) ?? ""].filter(Boolean);
     filters.push("Service Date = " + (dates[0] ?? "unavailable"));
@@ -139,7 +145,8 @@ function sourceVerification(data: ChurchData, args: AnalyticsArgs, result: Analy
     if (!args.date) filters.push("Last Sunday means the latest recorded Sunday in this sheet.");
   }
   const attendance = rosterOnly ? [] : data.attendance.filter((record) => dates.includes(record.date)
-    && members.some((member) => matchesMember(record, member, data.members.filter((entry) => normalize(entry.name) === normalize(member.name)).length === 1)));
+    && members.some((member) => matchesMember(record, member, data.members.filter((entry) => normalize(entry.name) === normalize(member.name)).length === 1)
+      && (args.operation !== "recent_absences" || record.status === "absent" && statusFor(data, member, record.date) === "absent")));
   function sheet(title: string, sourceRows: (number | undefined)[], lastColumn: string): SourceVerification["sheets"][number] {
     const rows = [...new Set(sourceRows.filter((row): row is number => row !== undefined))].sort((a, b) => a - b);
     const groups: { first: number; last: number }[] = [];
@@ -160,6 +167,7 @@ function sourceVerification(data: ChurchData, args: AnalyticsArgs, result: Analy
   if (!rosterOnly) sheets.push(sheet("Form Responses 1", attendance.map((record) => record.sourceRow), "G"));
   const calculation = args.operation === "member_count" ? "Count the matching member rows in Members; attendance submissions are not used."
     : args.operation === "member_search" ? "Match member name, ID, or email in Members."
+    : args.operation === "recent_absences" ? "Check each of the selected Sunday dates separately. Include only members with an explicit Absent status and no conflicting Present status. Missing submissions are unreported."
     : "Sunday totals use distinct Service Date values, not columns. Match attendance to roster members by email or unique name; conflicting statuses are excluded. Attendance rate = Present / (Present + Absent). Missing submissions stay unreported.";
   return { fetchedAt: result.fetchedAt, calculation, filters, dates, sheets };
 }
@@ -171,8 +179,25 @@ export function runAnalytics(data: ChurchData, args: AnalyticsArgs): AnalyticsRe
 function calculateAnalytics(data: ChurchData, args: AnalyticsArgs): AnalyticsResult {
   const dates = sundayDates(data);
   const latest = dates.at(-1) ?? "";
-  const requested = Math.min(Math.max(Math.floor(args.count || 3), 1), 52);
+  const requested = Math.min(Math.max(Math.floor(args.count || (args.operation === "recent_absences" ? 2 : 3)), 1), 52);
   switch (args.operation) {
+    case "recent_absences": {
+      const selected = dates.slice(-requested).reverse();
+      const result = base(data, args.operation, "Recorded absences by Sonta", "");
+      const scope = resolveMinistries(data, args.ministryNames);
+      result.columns = [{ key: "date", label: "Sunday" }, { key: "sonta", label: "Sonta" }, { key: "name", label: "Member" }];
+      if (scope.error) { result.summary = scope.error; return result; }
+      if (!selected.length) { result.summary = "No recorded Sunday dates were found."; return result; }
+      const names = scope.names.length ? scope.names : ministryNames(data);
+      for (const date of selected) for (const sonta of names) {
+        for (const member of data.members.filter((person) => person.ministry === sonta && statusFor(data, person, date) === "absent")) {
+          result.rows.push({ date, sonta, name: member.name });
+        }
+      }
+      result.summary = `${result.rows.length} recorded absences across ${selected.length} ${selected.length === 1 ? "Sunday" : "Sundays"} (${selected.slice().reverse().join(" and ")}), grouped by Sonta.`;
+      if (selected.length < requested) result.notes.push(`Only ${selected.length} recorded Sunday date(s) were available.`);
+      return result;
+    }
     case "attendance_list": {
       const date = args.date ?? latest;
       const status = args.status ?? "present";
@@ -183,7 +208,7 @@ function calculateAnalytics(data: ChurchData, args: AnalyticsArgs): AnalyticsRes
       if (!date || !dates.includes(date)) { result.summary = date ? `No Sunday attendance records are available for ${date}.` : "No Sunday attendance dates found."; return result; }
       const members = data.members.filter((member) => !scope.names.length || scope.names.includes(member.ministry));
       result.rows = members.filter((member) => statusFor(data, member, date) === status).map((member) => ({ name: member.name, ministry: member.ministry, date, status }));
-      result.columns = [{ key: "name", label: "Member" }, { key: "ministry", label: "Ministry" }, { key: "date", label: "Service date" }, { key: "status", label: "Recorded status" }];
+      result.columns = [{ key: "name", label: "Member" }, { key: "ministry", label: "Sonta" }, { key: "date", label: "Service date" }, { key: "status", label: "Recorded status" }];
       result.summary = `${result.rows.length} ${scope.names.length ? scope.names.join(" and ") + " " : ""}${result.rows.length === 1 ? "member" : "members"} recorded ${status} on Sunday ${date}.`;
       return result;
     }
@@ -191,25 +216,16 @@ function calculateAnalytics(data: ChurchData, args: AnalyticsArgs): AnalyticsRes
       const result = base(data, args.operation, "Member count", "");
       result.notes = [];
       result.sources = ["Members"];
-      result.columns = [{ key: "ministry", label: "Ministry" }, { key: "members", label: "Members" }];
+      result.columns = [{ key: "ministry", label: "Sonta" }, { key: "members", label: "Members" }];
       const requestedNames = (args.ministryNames ?? []).map((name) => name.trim()).filter(Boolean);
-      if (!requestedNames.length) {
-        result.rows = [{ ministry: "All ministries", members: data.members.length }];
+      if (!requestedNames.length || requestedNames.every(allSontas)) {
+        result.rows = [{ ministry: "All Sontas", members: data.members.length }];
         result.summary = `There are ${data.members.length} members in the church roster.`;
         return result;
       }
-      const available = ministryNames(data);
-      const matched = new Set<string>();
-      for (const requestedName of requestedNames) {
-        const exact = available.filter((name) => normalize(name) === normalize(requestedName));
-        const matches = exact.length ? exact : available.filter((name) => normalize(name).includes(normalize(requestedName)));
-        if (matches.length !== 1) {
-          result.summary = matches.length ? `Which ministry do you mean? Matching ministries: ${matches.join(", ")}.` : `I couldn't find a ministry named "${requestedName}" in the member roster.`;
-          return result;
-        }
-        matched.add(matches[0]);
-      }
-      result.rows = [...matched].map((ministry) => ({ ministry, members: data.members.filter((member) => member.ministry === ministry).length }));
+      const scope = resolveMinistries(data, requestedNames);
+      if (scope.error) { result.summary = scope.error; return result; }
+      result.rows = scope.names.map((ministry) => ({ ministry, members: data.members.filter((member) => member.ministry === ministry).length }));
       result.summary = result.rows.map((row) => `${row.ministry} has ${row.members} ${row.members === 1 ? "member" : "members"}.`).join(" ");
       return result;
     }
@@ -217,7 +233,7 @@ function calculateAnalytics(data: ChurchData, args: AnalyticsArgs): AnalyticsRes
       const counts = latest ? countsFor(data, data.members, [latest]) : countsFor(data, [], []);
       const result = base(data, args.operation, "Church overview", latest ? "Latest Sunday: " + latest : "No Sunday attendance dates found.");
       result.rows = [
-        { metric: "Members", value: data.members.length }, { metric: "Ministries", value: ministryNames(data).length },
+        { metric: "Members", value: data.members.length }, { metric: "Sontas", value: ministryNames(data).length },
         { metric: "Sundays recorded", value: dates.length }, { metric: "Present last Sunday", value: counts.present },
         { metric: "Explicitly absent last Sunday", value: counts.absent }, { metric: "Unreported last Sunday", value: counts.unreported },
         { metric: "Attendance rate last Sunday", value: rate(counts.present, counts.absent) + "%" },
@@ -228,7 +244,7 @@ function calculateAnalytics(data: ChurchData, args: AnalyticsArgs): AnalyticsRes
     case "absent_last_sunday": {
       const result = base(data, args.operation, "Explicit absences last Sunday", latest ? "Sunday " + latest : "No Sunday attendance date found.");
       result.rows = latest ? data.members.filter((member) => statusFor(data, member, latest) === "absent").map((member) => ({ name: member.name, ministry: member.ministry, date: latest })) : [];
-      result.columns = [{ key: "name", label: "Member" }, { key: "ministry", label: "Ministry" }, { key: "date", label: "Service date" }];
+      result.columns = [{ key: "name", label: "Member" }, { key: "ministry", label: "Sonta" }, { key: "date", label: "Service date" }];
       const unreported = latest ? data.members.filter((member) => statusFor(data, member, latest) === "unreported").length : 0;
       result.notes.push(unreported + " member(s) have no usable status for this Sunday.");
       return result;
@@ -237,22 +253,22 @@ function calculateAnalytics(data: ChurchData, args: AnalyticsArgs): AnalyticsRes
       const selected = dates.slice(-requested);
       const result = base(data, args.operation, "Explicit absences across consecutive Sundays", selected.length ? selected[0] + " to " + selected.at(-1) : "No Sunday dates found.");
       result.rows = selected.length === requested ? data.members.filter((member) => selected.every((date) => statusFor(data, member, date) === "absent")).map((member) => ({ name: member.name, ministry: member.ministry, sundays: requested })) : [];
-      result.columns = [{ key: "name", label: "Member" }, { key: "ministry", label: "Ministry" }, { key: "sundays", label: "Consecutive Sundays" }];
+      result.columns = [{ key: "name", label: "Member" }, { key: "ministry", label: "Sonta" }, { key: "sundays", label: "Consecutive Sundays" }];
       if (selected.length < requested) result.notes.push("Only " + selected.length + " Sunday date(s) are available; no consecutive-absence claim was made.");
       return result;
     }
     case "ministry_comparison":
     case "top_ministry":
     case "ministries": {
-      const requestedNames = (args.ministryNames ?? []).map(normalize);
+      const requestedNames = (args.ministryNames ?? []).filter((name) => !allSontas(name)).map(normalize);
       const names = ministryNames(data).filter((name) => !requestedNames.length || requestedNames.some((requestedName) => normalize(name).includes(requestedName)));
-      const result = base(data, args.operation, args.operation === "top_ministry" ? "Ministry attendance ranking" : "Ministry attendance comparison", "Across " + dates.length + " recorded Sundays.");
+      const result = base(data, args.operation, args.operation === "top_ministry" ? "Sonta attendance ranking" : "Sonta attendance comparison", "Across " + dates.length + " recorded Sundays.");
       result.rows = names.map((name) => {
         const members = data.members.filter((member) => member.ministry === name);
         const counts = countsFor(data, members, dates);
         return { ministry: name, members: members.length, present: counts.present, absent: counts.absent, unreported: counts.unreported, rate: rate(counts.present, counts.absent) };
       }).sort((a, b) => Number(b.rate) - Number(a.rate));
-      result.columns = [{ key: "ministry", label: "Ministry" }, { key: "members", label: "Members" }, { key: "present", label: "Present" }, { key: "absent", label: "Absent" }, { key: "unreported", label: "Unreported" }, { key: "rate", label: "Rate %" }];
+      result.columns = [{ key: "ministry", label: "Sonta" }, { key: "members", label: "Members" }, { key: "present", label: "Present" }, { key: "absent", label: "Absent" }, { key: "unreported", label: "Unreported" }, { key: "rate", label: "Rate %" }];
       result.chart = { type: "bar", labels: result.rows.map((row) => String(row.ministry)), series: [{ name: "Attendance rate", values: result.rows.map((row) => Number(row.rate)) }], unit: "%" };
       if (args.operation === "top_ministry" && result.rows.length) result.summary = "Highest reported attendance rate: " + result.rows[0].ministry + " (" + result.rows[0].rate + "%).";
       return result;
@@ -275,7 +291,7 @@ function calculateAnalytics(data: ChurchData, args: AnalyticsArgs): AnalyticsRes
       const result = base(data, args.operation, args.operation === "member_history" ? "Member attendance history" : "Member search", found.length === 1 ? found[0].name : found.length + " matching members.");
       if (args.operation === "member_search" || found.length !== 1) {
         result.rows = found.map((member) => ({ id: member.id, name: member.name, ministry: member.ministry, email: member.email }));
-        result.columns = [{ key: "id", label: "ID" }, { key: "name", label: "Member" }, { key: "ministry", label: "Ministry" }, { key: "email", label: "Email" }];
+        result.columns = [{ key: "id", label: "ID" }, { key: "name", label: "Member" }, { key: "ministry", label: "Sonta" }, { key: "email", label: "Email" }];
       } else {
         result.rows = dates.map((date) => ({ date, status: statusFor(data, found[0], date) }));
         result.columns = [{ key: "date", label: "Sunday" }, { key: "status", label: "Recorded status" }];

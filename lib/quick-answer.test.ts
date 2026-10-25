@@ -8,6 +8,7 @@ describe("local product help", () => {
     assert.match(getLocalReply("  What can you do? ")!, /retrieve member records/);
     assert.match(getLocalReply("HELP")!, /connected Google Sheet/);
     assert.match(getLocalReply("Hello!")!, /Ask me/);
+    assert.equal(getLocalReply("okay"), "Okay. What would you like to check next?");
     for (const question of ["Hi, how many members?", "What can you do for the choir?", "Help compare October attendance"])
       assert.equal(getLocalReply(question), null);
   });
@@ -25,6 +26,22 @@ describe("deterministic question selection", () => {
     assert.deepEqual(getQuickQuery("Who was present in Dancing Stars last Sunday?", false),
       { operation: "attendance_list", ministryNames: ["dancing stars"], status: "present" });
     assert.equal(getQuickQuery("list those present in Dancing Stars and Choir last Sunday", false), null);
+  });
+  test("routes the user's two-Sunday Sonta absence request to verified analytics", () => {
+    assert.deepEqual(getQuickQuery("list absentees from last two weeks sunday for the various sontas", true),
+      { operation: "recent_absences", count: 2 });
+  });
+  test("uses conversation context to repair a one-Sunday answer instead of repeating it after okay", () => {
+    const earlier = [
+      { role: "user", content: "list absentees from last two weeks sunday for the various sontas" },
+      { role: "assistant", content: "15 members absent on Sunday 2026-10-18." },
+    ];
+    assert.deepEqual(getQuickQuery("i asked for last two sundays", true, earlier), { operation: "recent_absences", count: 2 });
+    const correction = [...earlier, { role: "user", content: "i asked for last two sundays" }, { role: "assistant", content: "15 members absent on Sunday 2026-10-18." }];
+    assert.deepEqual(getQuickQuery("okay", true, correction), { operation: "recent_absences", count: 2 });
+    const repaired = [...correction, { role: "assistant", content: "2026-10-11 and 2026-10-18 were checked." }];
+    assert.equal(getQuickQuery("okay", true, repaired), null);
+    assert.equal(getQuickQuery("i asked for last two sundays", true, [{ role: "user", content: "show me last two weeks of giving" }]), null);
   });
   test("routes exact suggestion prompts to supported calculations", () => {
     const questions = [

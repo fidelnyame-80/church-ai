@@ -62,7 +62,7 @@ describe("attendance calculations", () => {
     assert.match(missing.summary, /couldn't find/);
     const ambiguous = runAnalytics(data, { operation: "member_count", ministryNames: ["cho"] });
     assert.deepEqual(ambiguous.rows, []);
-    assert.match(ambiguous.summary, /Which ministry/);
+    assert.match(ambiguous.summary, /Which Sonta/);
     assert.equal(runAnalytics(data, { operation: "member_count", ministryNames: ["Choir"] }).rows[0].members, 2);
   });
   test("missing submissions stay unreported and do not become absences", () => {
@@ -72,6 +72,25 @@ describe("attendance calculations", () => {
     const overview = runAnalytics(data, { operation: "overview" });
     assert.equal(overview.rows.find((item) => item.metric === "Unreported last Sunday")?.value, 1);
     assert.equal(overview.rows.find((item) => item.metric === "Attendance rate last Sunday")?.value, "50%");
+  });
+  test("lists explicit absences for each of the latest two recorded Sundays by Sonta", () => {
+    const data = parseChurchData(members, [header,
+      row("04/10/2026", "Ama Mensah", "Absent"),
+      row("11/10/2026", "Ama Mensah", "Absent"),
+      row("11/10/2026", "Kojo Agyeman", "Present"),
+      row("18/10/2026", "Kojo Agyeman", "Absent"),
+      row("18/10/2026", "Esi Owusu", "Absent"),
+      row("18/10/2026", "Esi Owusu", "Present"),
+    ]);
+    const result = runAnalytics(data, { operation: "recent_absences", ministryNames: ["various sontas"] });
+    assert.deepEqual(result.rows, [
+      { date: "2026-10-18", sonta: "Ushers", name: "Kojo Agyeman" },
+      { date: "2026-10-11", sonta: "Choir", name: "Ama Mensah" },
+    ]);
+    assert.deepEqual(result.verification?.dates, ["2026-10-11", "2026-10-18"]);
+    assert.equal(result.verification?.sheets[1].rowCount, 2);
+    assert.match(result.summary, /2 recorded absences across 2 Sundays/);
+    assert.equal(runAnalytics(data, { operation: "member_count", ministryNames: ["sontas"] }).rows[0].members, 3);
   });
 
   test("three consecutive Sundays requires three explicit Absent statuses", () => {
