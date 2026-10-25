@@ -7,9 +7,9 @@ const providers = {
 } as const;
 
 export function getAIConfig(env: Record<string, string | undefined> = process.env) {
-  const selected = env.AI_PROVIDER?.trim().toLowerCase() || (env.GROQ_API_KEY?.trim() ? "groq" : env.NVIDIA_API_KEY?.trim() ? "nvidia" : "xai");
+  const selected = env.AI_PROVIDER?.trim().toLowerCase() || "groq";
   const provider: AIProvider | null = selected === "xai" || selected === "nvidia" || selected === "groq" ? selected : null;
-  const settings = providers[provider ?? "xai"];
+  const settings = providers[provider ?? "groq"];
   const { keyName, modelName, baseURL } = settings;
   const apiKey = provider ? env[keyName]?.trim() : undefined;
   return {
@@ -25,7 +25,7 @@ export function getAIConfig(env: Record<string, string | undefined> = process.en
 }
 
 export function aiProviderError(error: unknown, config: ReturnType<typeof getAIConfig>) {
-  const label = providers[config.provider ?? "xai"].label;
+  const label = providers[config.provider ?? "groq"].label;
   const status = error && typeof error === "object" && "status" in error ? error.status : undefined;
   // Never forward a provider's raw error: some providers echo API credentials.
   if (status === 408 || (error instanceof Error && /timeout|timed out|aborted/i.test(error.message))) return `${label} took too long to respond. Try again; common attendance questions can still be retrieved directly from your records.`;

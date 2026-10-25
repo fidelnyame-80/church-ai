@@ -1,7 +1,7 @@
 import "server-only";
 import { GoogleAuth, JWT } from "google-auth-library";
 import { parseChurchData, type ChurchData } from "./attendance";
-import { getAIConfig } from "./ai-config";
+import { getAppConfig } from "./app-config";
 
 let cache: { data: ChurchData; expires: number } | null = null;
 let pendingData: Promise<ChurchData> | null = null;
@@ -12,26 +12,7 @@ const scope = "https://www.googleapis.com/auth/spreadsheets.readonly";
 const spreadsheetId = () => process.env.GOOGLE_SHEETS_SPREADSHEET_ID || process.env.GOOGLE_SHEET_ID;
 const serviceAccountEmail = () => process.env.GOOGLE_SERVICE_ACCOUNT_EMAIL || process.env.GOOGLE_CLIENT_EMAIL;
 
-export function configStatus() {
-  const ai = getAIConfig();
-  const hasCredential = Boolean(
-    process.env.GOOGLE_APPLICATION_CREDENTIALS ||
-    process.env.GOOGLE_SERVICE_ACCOUNT_JSON ||
-    (serviceAccountEmail() && process.env.GOOGLE_PRIVATE_KEY)
-  );
-  return {
-    sheetsConfigured: Boolean(spreadsheetId() && hasCredential),
-    grokConfigured: Boolean(process.env.XAI_API_KEY),
-    aiConfigured: ai.configured,
-    aiProvider: ai.provider,
-    aiModel: ai.model,
-    missing: [
-      ...(!spreadsheetId() ? ["GOOGLE_SHEET_ID"] : []),
-      ...(!hasCredential ? ["GOOGLE_CLIENT_EMAIL + GOOGLE_PRIVATE_KEY"] : []),
-      ...ai.missing,
-    ],
-  };
-}
+export const configStatus = getAppConfig;
 
 async function accessToken(): Promise<string> {
   if (process.env.GOOGLE_APPLICATION_CREDENTIALS) {

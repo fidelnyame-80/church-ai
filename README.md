@@ -58,7 +58,7 @@ XAI_API_KEY=your_private_key
 XAI_MODEL=grok-4.7
 ```
 
-If `AI_PROVIDER` is omitted, the app selects a configured Groq key first, then NVIDIA, then xAI. An explicit selection always wins. Restart the server after changing environment values. Run `bun scripts/check-ai.ts` to check provider authentication without printing credentials, then ask a question in the app to verify retrieval and the generated answer together.
+If `AI_PROVIDER` is omitted, the app selects Groq and reports `GROQ_API_KEY` when its key is missing. NVIDIA and xAI require an explicit `AI_PROVIDER` value. Restart the server after changing environment values. Run `bun scripts/check-ai.ts --provider=groq` to check Groq authentication without printing credentials, then ask a question in the app to verify retrieval and the generated answer together.
 
 ## Groq voice conversations
 

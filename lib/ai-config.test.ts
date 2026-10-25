@@ -25,10 +25,14 @@ describe("AI provider configuration", () => {
     assert.equal(config.provider, "groq");
     assert.equal(config.model, "llama-3.3-70b-versatile");
   });
-  test("implicit selection prefers Groq, then NVIDIA, then xAI", () => {
+  test("defaults to Groq even when no API keys are configured", () => {
+    const empty = getAIConfig({});
+    assert.equal(empty.provider, "groq");
+    assert.equal(empty.baseURL, "https://api.groq.com/openai/v1");
+    assert.deepEqual(empty.missing, ["GROQ_API_KEY"]);
     assert.equal(getAIConfig({ GROQ_API_KEY: "groq-key", NVIDIA_API_KEY: "nvidia-key", XAI_API_KEY: "xai-key" }).provider, "groq");
-    assert.equal(getAIConfig({ NVIDIA_API_KEY: "nvidia-key", XAI_API_KEY: "xai-key" }).provider, "nvidia");
-    assert.equal(getAIConfig({ XAI_API_KEY: "xai-key" }).provider, "xai");
+    assert.deepEqual(getAIConfig({ NVIDIA_API_KEY: "nvidia-key", XAI_API_KEY: "xai-key" }).missing, ["GROQ_API_KEY"]);
+    assert.deepEqual(getAIConfig({ XAI_API_KEY: "xai-key" }).missing, ["GROQ_API_KEY"]);
   });
   test("explicit NVIDIA selection wins over an available Groq key", () => {
     const config = getAIConfig({ AI_PROVIDER: "nvidia", GROQ_API_KEY: "groq-key", NVIDIA_API_KEY: "nvidia-key" });
@@ -43,7 +47,7 @@ describe("AI provider configuration", () => {
     assert.deepEqual(config.missing, ["NVIDIA_API_KEY"]);
   });
   test("adding NVIDIA selects its hosted endpoint without exposing the key in model settings", () => {
-    const config = getAIConfig({ NVIDIA_API_KEY: "test-key", XAI_API_KEY: "other-key" });
+    const config = getAIConfig({ AI_PROVIDER: "nvidia", NVIDIA_API_KEY: "test-key", XAI_API_KEY: "other-key" });
     assert.equal(config.provider, "nvidia");
     assert.equal(config.model, "openai/gpt-oss-20b");
     assert.equal(config.baseURL, "https://integrate.api.nvidia.com/v1");
@@ -61,14 +65,14 @@ describe("AI provider configuration", () => {
     assert.deepEqual(config.missing, ["AI_PROVIDER (groq, nvidia, or xai)"]);
   });
   test("provider error details cannot echo credentials back to the browser", () => {
-    const config = getAIConfig({ NVIDIA_API_KEY: "secret-test-key" });
+    const config = getAIConfig({ AI_PROVIDER: "nvidia", NVIDIA_API_KEY: "secret-test-key" });
     const message = aiProviderError({ status: 403, message: "Incorrect API key secret-test-key" }, config);
     assert.match(message, /NVIDIA_API_KEY/);
     assert.equal(message.includes("secret-test-key"), false);
     assert.equal(aiProviderError(new Error("secret-test-key"), config).includes("secret-test-key"), false);
   });
   test("provider timeouts explain the delay without leaking request details", () => {
-    const config = getAIConfig({ NVIDIA_API_KEY: "secret-test-key" });
+    const config = getAIConfig({ AI_PROVIDER: "nvidia", NVIDIA_API_KEY: "secret-test-key" });
     const message = aiProviderError(new Error("Request timed out with secret-test-key"), config);
     assert.match(message, /took too long/);
     assert.equal(message.includes("secret-test-key"), false);
